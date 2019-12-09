@@ -27,7 +27,7 @@ float medianPixel(std::vector<float> values);
 cv::Mat medianRowsCols(cv::Mat image, int frameBufferSize);
 float excludeExtreme(cv::Mat image,int i,bool type);
 cv::Mat interpolation(cv::Mat image, cv::Mat binary);
-cv::Mat repairInputData(cv::Mat image, cv::Mat median);
+cv::Mat repairInputData(cv::Mat image, cv::Mat median, int count);
 
 string path;
 float percentage;
@@ -121,13 +121,17 @@ int main(int argc, char **argv)
 
     medianCloud = generatePointCloud(interpolated,path+"/data/median");
 
+
+
         //    cv::normalize(interpolated, interpolated, 0, 255,cv::NORM_MINMAX);
     cv::imwrite(path + "/data/median.hdr",interpolated);
 
     int i=0;
     for(auto image : images)
     {
+        //(void)repairInputData(image,interpolated, i);
         (void)generatePointCloud(image,path+"/data/cloud"+IntToStr(i));
+
         i++;
     }
 //    pcl::visualization::CloudViewer viewer ("Simple Cloud Viewer");
@@ -501,9 +505,22 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr generatePointCloud(cv::Mat medianImage,st
     return cloud;
 }
 
-cv::Mat repairInputData(cv::Mat image, cv::Mat median){
+cv::Mat repairInputData(cv::Mat image, cv::Mat median, int count){
 
+    for(int i=0;i<image.rows;i++){
+        for(int j=0;j<image.cols;j++){
+            auto imagePixel = image.at<float>(i,j);
+            auto medianPixel = median.at<float>(i,j);
 
+            auto var = abs(imagePixel-medianPixel);
+
+            if(var>20){
+                image.at<float>(i,j)=medianPixel;
+            }
+        }
+    }
+    (void)generatePointCloud(image,path+"/data/cloud"+IntToStr(count));
+    return image;
 }
 
 
