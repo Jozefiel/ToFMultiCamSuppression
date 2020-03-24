@@ -11,6 +11,8 @@
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/voxel_grid.h>
 #include <math.h>
+#include <chrono>
+
 using namespace std;
 namespace fs = boost::filesystem;
 
@@ -28,16 +30,20 @@ cv::Mat medianRowsCols(cv::Mat image, int frameBufferSize);
 float excludeExtreme(cv::Mat image,int i,bool type);
 cv::Mat interpolation(cv::Mat image, cv::Mat binary);
 cv::Mat repairInputData(cv::Mat image, cv::Mat median, int count);
+void saveLUT(cv::Mat depth, std::string path);
 
 string path;
 float percentage;
 int rgbRows=0;
 cv::Mat reference_rgb;
 cv::Mat _importanceMap, _interferenceBinary;
-cv::Rect myROI(100, 95, 300, 190);
+cv::Rect myROI(0, 0, 512, 424);
 pcl::PointCloud<pcl::PointXYZRGB>::Ptr medianCloud=nullptr;
 int main(int argc, char **argv)
 {
+
+    std::chrono::system_clock::time_point then, now;
+
     path=argv[1];
     reference_rgb=cv::imread(path+argv[2],cv::IMREAD_COLOR);
     cv::Mat image=cv::Mat::zeros(reference_rgb.rows,reference_rgb.cols,CV_32FC1);
@@ -84,7 +90,7 @@ int main(int argc, char **argv)
             cv::normalize(image, tmpDepth, 0, 255,cv::NORM_MINMAX);
             cv::imwrite(path + "/data/origos"+IntToStr(frameBufferSize) + ".png",tmpDepth(myROI));
 
-            cv::inRange(image,80,1300,tmpBinary);
+            cv::inRange(image,80,750,tmpBinary);
 
             cv::Mat element = cv::getStructuringElement( cv::MORPH_RECT,cv::Size( 3*1 + 1, 3*1+1 ),cv::Point( 1, 1 ) );
             cv::erode( tmpBinary, tmpBinary, element );
@@ -105,6 +111,8 @@ int main(int argc, char **argv)
         }
     }
 
+    then=std::chrono::system_clock::now();
+
     auto reference = select_reference_min(images, imageNames);
 //    auto reference = select_reference(images, imageNames);
     auto interferenceROI = diff_depth(images, reference);
@@ -116,15 +124,18 @@ int main(int argc, char **argv)
     auto interpolated = interpolation(medianImage, _interferenceBinary);
 
     cv::imwrite(path + "/data/interp_mask.hdr",interpolated);
+
     interpolated = interpolated+filtered;
 
 
     medianCloud = generatePointCloud(interpolated,path+"/data/median");
 
-
+    now=std::chrono::system_clock::now();
+    std::cout <<std::chrono::duration_cast<std::chrono::milliseconds>(now - then).count() << " ms" << std::endl;
 
         //    cv::normalize(interpolated, interpolated, 0, 255,cv::NORM_MINMAX);
     cv::imwrite(path + "/data/median.hdr",interpolated);
+    saveLUT(interpolated,path);
 
     int i=0;
     for(auto image : images)
@@ -134,6 +145,8 @@ int main(int argc, char **argv)
 
         i++;
     }
+
+
 //    pcl::visualization::CloudViewer viewer ("Simple Cloud Viewer");
 //    viewer.showCloud(cloud);
 //    while (!viewer.wasStopped ())
@@ -446,6 +459,11 @@ cv::Mat interpolation(cv::Mat image, cv::Mat binary){
 
 pcl::PointCloud<pcl::PointXYZRGB>::Ptr generatePointCloud(cv::Mat medianImage,std::string name){
 
+    transpose(medianImage, medianImage);
+    cv::Mat tmpImage;
+    transpose(reference_rgb, tmpImage);
+    cv::imwrite("depth_med.png",medianImage);
+    cv::imwrite("ref.png",tmpImage);
 
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
     cloud->width = static_cast<uint32_t>(medianImage.cols);
@@ -455,19 +473,22 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr generatePointCloud(cv::Mat medianImage,st
 
     uint32_t n=0;
     double x=0, y=0, z=0;
-    int fx=364,fy=365,cx=258,cy=208;
-    cvtColor(reference_rgb, reference_rgb, cv::COLOR_RGBA2RGB);
-    for (int y_side = 0; y_side < medianImage.cols; y_side++)
+    const float fx=363.709,fy=363.709,cx=254.799,cy=209.699;
+    cvtColor(tmpImage, tmpImage, cv::COLOR_RGBA2RGB);
+//    flip(reference_rgb, reference_rgb, +1);
+
+    for (int x_side = 0; x_side < medianImage.cols; x_side++)
     {
-        for (int x_side = 0; x_side < medianImage.rows; x_side++)
+        for (int y_side = 0; y_side < medianImage.rows; y_side++)
         {
-            double Z = medianImage.at<float>(x_side, y_side) / 1;
+            const float icx(cx), icy(cy);
+            const float ifx(1/fx), ify(1/fy);
+            double Z = medianImage.at<float>(x_side, y_side)/1000.0f;
+ //           auto Z=medianImage.data[512*y_side+x_side]/1000.0f;
             if(Z>0)
             {
-                Z=1.0 / (Z * -0.0030711016 + 3.3309495161);
-
-                x=(x_side-cx)*Z/fx;
-                y=(y_side-cy)*Z/fy;
+                x=(x_side + 0.5 - icx)*ifx*Z;
+                y=(y_side + 0.5 - icy)*ify*Z;
                 z=Z;
             }
             else
@@ -484,7 +505,7 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr generatePointCloud(cv::Mat medianImage,st
 //            cloud->points[n].g=maskRGB.at<cv::Vec3b>(x_side,y_side)[1];
 //            cloud->points[n].b=maskRGB.at<cv::Vec3b>(x_side,y_side)[0];
 
-            cv::Vec3b tmp_rgb=reference_rgb.at<cv::Vec3b>(x_side,y_side);
+            cv::Vec3b tmp_rgb=tmpImage.at<cv::Vec3b>(x_side,y_side);
             if(tmp_rgb[2]==0 && tmp_rgb[1]==0 && tmp_rgb[0]==0)
             {
               tmp_rgb[2]=255;
@@ -523,7 +544,27 @@ cv::Mat repairInputData(cv::Mat image, cv::Mat median, int count){
     return image;
 }
 
+void saveLUT(cv::Mat depth, std::string path)
+{
+#define ir_depth_width 512
+#define ir_depth_height 424
+    int i,j;
 
+    ofstream myfile;
+    myfile.open(path + "/data/median.txt");
+
+    for(i = 0; i < depth.cols; i++)
+    {
+        for(j = 0; j < depth.rows; j++)
+        {
+            double orig = depth.at<float>(j,i);
+            myfile<<orig<<"\n";
+
+        }
+    }
+
+    myfile.close();
+}
 
 template <class T>
 std::string IntToStr(T n){

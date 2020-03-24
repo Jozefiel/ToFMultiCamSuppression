@@ -13,9 +13,9 @@ endif(CCACHE_FOUND)
 set (CMAKE_CXX_FLAGS "-DPCL_ONLY_CORE_POINT_TYPES=ON -DNO_EXPLICIT_INSTANTIATIONS")
 
 #find requirements
-find_package(PCL 1.9.1 REQUIRED )
+find_package(PCL 1.10 REQUIRED )
 find_package(OpenCV REQUIRED )
-find_package(VTK REQUIRED )
+find_package(VTK 8.2 REQUIRED )
 find_package(Threads )
 
 #link libs
