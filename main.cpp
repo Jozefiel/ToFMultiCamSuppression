@@ -12,6 +12,7 @@
 #include <pcl/filters/voxel_grid.h>
 #include <math.h>
 #include <chrono>
+#include <random>
 
 using namespace std;
 namespace fs = boost::filesystem;
@@ -24,16 +25,18 @@ int select_reference(std::vector<cv::Mat> images, std::vector<string> imageNames
 int select_reference_min(std::vector<cv::Mat> images, std::vector<string> imageNames);
 std::vector<cv::Mat> interference_remove(std::vector<cv::Mat> images, std::vector<cv::Mat> interferenceROI);
 cv::Mat medianImages(std::vector<cv::Mat> images,std::vector<cv::Mat> uninterferenceROI);
-pcl::PointCloud<pcl::PointXYZRGB>::Ptr generatePointCloud(cv::Mat medianImage,string);
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr generatePointCloud(cv::Mat medianImage, string, bool withNaN);
 float medianPixel(std::vector<float> values);
 cv::Mat medianRowsCols(cv::Mat image, int frameBufferSize);
 float excludeExtreme(cv::Mat image,int i,bool type);
 cv::Mat interpolation(cv::Mat image, cv::Mat binary);
-cv::Mat repairInputData(cv::Mat image, cv::Mat median, int count);
+cv::Mat repairInputData(cv::Mat image, cv::Mat interfROI, cv::Mat median, int count);
 void saveLUT(cv::Mat depth, std::string path);
+cv::Mat generateIslands(cv::Mat image);
 
 string path;
 float percentage;
+float replace_thresh;
 int rgbRows=0;
 cv::Mat reference_rgb;
 cv::Mat _importanceMap, _interferenceBinary;
@@ -50,6 +53,7 @@ int main(int argc, char **argv)
     rgbRows=reference_rgb.rows;
     reference_rgb=reference_rgb(myROI);
     percentage=std::stof(argv[3]);
+    replace_thresh=std::stof(argv[4]);
     std::vector<cv::Mat> images;
     std::vector<string> imageNames;
     string ext{".txt"};
@@ -62,7 +66,7 @@ int main(int argc, char **argv)
 
             ifstream depthTxt;
             depthTxt.open(p.path().string());
-    
+            std::cout<<p.path().string()<<std::endl;
             string line;
             double counter;
             int rows=0;
@@ -85,67 +89,74 @@ int main(int argc, char **argv)
 //            cv::Rect myROI(255, 125, 100, 175);
 //            cv::Rect myROI(170, 65, 90, 175);
 //            cvtColor(image, image, cv::COLOR_BGR2GRAY);
+//            image = generateIslands(image);
+            (void)generatePointCloud(image,path+"/data/original"+IntToStr(frameBufferSize), true);
+
             cv::Mat tmpBinary;
             cv::Mat tmpDepth;
             cv::normalize(image, tmpDepth, 0, 255,cv::NORM_MINMAX);
-            cv::imwrite(path + "/data/origos"+IntToStr(frameBufferSize) + ".png",tmpDepth(myROI));
+//            cv::imwrite(path + "/data/origos"+IntToStr(frameBufferSize) + ".png",tmpDepth(myROI));
 
-            cv::inRange(image,80,750,tmpBinary);
+//            cv::inRange(image,80,750,tmpBinary);
 
-            cv::Mat element = cv::getStructuringElement( cv::MORPH_RECT,cv::Size( 3*1 + 1, 3*1+1 ),cv::Point( 1, 1 ) );
-            cv::erode( tmpBinary, tmpBinary, element );
+
             cv::Mat tmpImage;
 
             image.copyTo(tmpImage,tmpBinary);
-            (void)generatePointCloud(tmpImage,path+"/data/original"+IntToStr(frameBufferSize));
-
-
+//            (void)generatePointCloud(tmpImage,path+"/data/original"+IntToStr(frameBufferSize));
 
             images.emplace_back(tmpImage(myROI));
             imageNames.emplace_back(p.path().string());
 
-
             cv::normalize(tmpImage, tmpDepth, 0, 255,cv::NORM_MINMAX);
-            cv::imwrite(path + "/data/original"+IntToStr(frameBufferSize) + ".png",tmpDepth);
+//            cv::imwrite(path + "/data/original"+IntToStr(frameBufferSize) + ".png",tmpDepth);
             frameBufferSize++;
         }
     }
 
     then=std::chrono::system_clock::now();
 
-    auto reference = select_reference_min(images, imageNames);
-//    auto reference = select_reference(images, imageNames);
+//    auto reference = select_reference_min(images, imageNames);
+    auto reference = select_reference(images, imageNames);
     auto interferenceROI = diff_depth(images, reference);
     auto uninterferenceROI = interference_remove(images,interferenceROI);
+
     auto medianImage = medianImages(images,images);
 
 
     auto filtered = medianRowsCols(medianImage,frameBufferSize);
     auto interpolated = interpolation(medianImage, _interferenceBinary);
 
-    cv::imwrite(path + "/data/interp_mask.hdr",interpolated);
+//    cv::imwrite(path + "/data/interp_mask.hdr",interpolated);
 
     interpolated = interpolated+filtered;
 
 
-    medianCloud = generatePointCloud(interpolated,path+"/data/median");
+//    medianCloud = generatePointCloud(interpolated,path+"/data/median");
 
-    now=std::chrono::system_clock::now();
-    std::cout <<std::chrono::duration_cast<std::chrono::milliseconds>(now - then).count() << " ms" << std::endl;
+
 
         //    cv::normalize(interpolated, interpolated, 0, 255,cv::NORM_MINMAX);
-    cv::imwrite(path + "/data/median.hdr",interpolated);
-    saveLUT(interpolated,path);
+//    cv::imwrite(path + "/data/median.hdr",interpolated);
+//    saveLUT(interpolated,path);
 
     int i=0;
     for(auto image : images)
     {
-        //(void)repairInputData(image,interpolated, i);
-        (void)generatePointCloud(image,path+"/data/cloud"+IntToStr(i));
+        repairInputData(image,_interferenceBinary,interpolated,i);
+
+
+
+//        cv::Mat tmpUnfilterMask, notBin;
+//        cv::bitwise_not(_interferenceBinary,notBin);
+//        image.copyTo(tmpUnfilterMask, notBin);
+        (void)generatePointCloud(image,path+"/data/uninterfer_"+IntToStr(i),false);
 
         i++;
     }
 
+    now=std::chrono::system_clock::now();
+    std::cout <<std::chrono::duration_cast<std::chrono::milliseconds>(now - then).count() << " ms" << std::endl;
 
 //    pcl::visualization::CloudViewer viewer ("Simple Cloud Viewer");
 //    viewer.showCloud(cloud);
@@ -165,7 +176,7 @@ int select_reference(std::vector<cv::Mat> images, std::vector<string> imageNames
     }
     int N = sizeof(nonZero) / sizeof(int);
     int position = distance(nonZero, max_element(nonZero, nonZero + (sizeof(nonZero) / sizeof(int))));
-    std::cout<<"Reference: " << nonZero[position]<<" "<<imageNames[position]<<std::endl;
+//    std::cout<<"Reference: " << nonZero[position]<<" "<<imageNames[position]<<std::endl;
     return position;
 }
 
@@ -181,7 +192,7 @@ int select_reference_min(std::vector<cv::Mat> images, std::vector<string> imageN
     }
     int N = sizeof(nonZero) / sizeof(int);
     int position = distance(nonZero, max_element(nonZero, nonZero + (sizeof(nonZero) / sizeof(int))));
-    std::cout<<"Reference: " << nonZero[position]<<" "<<imageNames[position]<<std::endl;
+//    std::cout<<"Reference: " << nonZero[position]<<" "<<imageNames[position]<<std::endl;
     return position;
 }
 
@@ -194,7 +205,9 @@ std::vector<cv::Mat> diff_depth(std::vector<cv::Mat> images, int reference){
         cv::absdiff(referenceImage,image,diffImage);
         cv::Mat tmp;
         cv::normalize(diffImage, tmp, 0, 255,cv::NORM_MINMAX);
-        cv::imwrite(path + "/data/interferenceROI"+IntToStr(i) + ".png",tmp);
+        cv::Mat element = cv::getStructuringElement( cv::MORPH_RECT,cv::Size( 1*1 + 1, 1*1+1 ),cv::Point( 1, 1 ) );
+        cv::dilate( tmp, tmp, element );
+//        cv::imwrite(path + "/data/interferenceROI"+IntToStr(i) + ".png",tmp);
         interferenceROI.emplace_back(diffImage);
         i++;
     }
@@ -210,10 +223,10 @@ std::vector<cv::Mat> interference_remove(std::vector<cv::Mat> images,std::vector
         cv::Mat tmp;
         cv::Mat tmpDepth;
         tmpBinary.convertTo(tmpBinary, CV_8U);
-        cv::imwrite(path +"/data/binary"+IntToStr(i) + ".png",interferenceROI[i]);
+//        cv::imwrite(path +"/data/binary"+IntToStr(i) + ".png",interferenceROI[i]);
         image.copyTo(tmpDepth, tmpBinary);
         cv::normalize(tmpDepth, tmp, 0, 255,cv::NORM_MINMAX);
-        cv::imwrite(path +"/data/uninterferenceROI"+IntToStr(i) + ".png",tmp);
+//        cv::imwrite(path +"/data/uninterferenceROI"+IntToStr(i) + ".png",tmp);
         uninterferenceROI.emplace_back(tmpDepth);
         i++;
     }
@@ -242,11 +255,12 @@ cv::Mat medianImages(std::vector<cv::Mat> images,std::vector<cv::Mat> uninterfer
         }
     }
     importanceMap.copyTo(_importanceMap);
+
     cv::Mat tmp;
     cv::normalize(importanceMap, tmp, 0, 255,cv::NORM_MINMAX);
-    cv::imwrite(path+"/data/importanceMap.png",tmp);
+//    cv::imwrite(path+"/data/importanceMap.png",tmp);
     cv::normalize(medianImage, tmp, 0, 255,cv::NORM_MINMAX);
-    cv::imwrite(path+"/data/median.png",tmp);
+//    cv::imwrite(path+"/data/median.png",tmp);
     return medianImage;
 }
 
@@ -274,11 +288,11 @@ cv::Mat medianRowsCols(cv::Mat image, int frameBufferSize){
 
     cv::Mat tmpBinary, tmpImage;
     cv::inRange(_importanceMap,1,round(frameBufferSize*percentage),_interferenceBinary);
-    cv::imwrite(path+"/data/binary.png",_interferenceBinary);
+//    cv::imwrite(path+"/data/binary.png",_interferenceBinary);
     cv::bitwise_not(_interferenceBinary,tmpBinary);
-    cv::imwrite(path+"/data/notBinary.png",tmpBinary);
+//    cv::imwrite(path+"/data/notBinary.png",tmpBinary);
     image.copyTo(filtered,tmpBinary);
-    auto cloud = generatePointCloud(filtered,path+"/data/filtered");
+    auto cloud = generatePointCloud(filtered,path+"/data/filtered", false);
 
 //    for(int i=0;i<image.cols;i++){
 //        for(int j=0;j<image.rows;j++){
@@ -387,7 +401,7 @@ cv::Mat interpolation(cv::Mat image, cv::Mat binary){
             k++;
         }
     }
-    cv::imwrite(path+"/data/horizontal.png",tmpImageHorizontal);
+//    cv::imwrite(path+"/data/horizontal.png",tmpImageHorizontal);
 
 
     points.clear();
@@ -457,13 +471,13 @@ cv::Mat interpolation(cv::Mat image, cv::Mat binary){
 }
 
 
-pcl::PointCloud<pcl::PointXYZRGB>::Ptr generatePointCloud(cv::Mat medianImage,std::string name){
+pcl::PointCloud<pcl::PointXYZRGB>::Ptr generatePointCloud(cv::Mat medianImage,std::string name, bool withNaN){
 
     transpose(medianImage, medianImage);
     cv::Mat tmpImage;
     transpose(reference_rgb, tmpImage);
-    cv::imwrite("depth_med.png",medianImage);
-    cv::imwrite("ref.png",tmpImage);
+//    cv::imwrite("depth_med.png",medianImage);
+//    cv::imwrite("ref.png",tmpImage);
 
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
     cloud->width = static_cast<uint32_t>(medianImage.cols);
@@ -485,17 +499,24 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr generatePointCloud(cv::Mat medianImage,st
             const float ifx(1/fx), ify(1/fy);
             double Z = medianImage.at<float>(x_side, y_side)/1000.0f;
  //           auto Z=medianImage.data[512*y_side+x_side]/1000.0f;
-            if(Z>0)
-            {
+
+            if(withNaN){
                 x=(x_side + 0.5 - icx)*ifx*Z;
                 y=(y_side + 0.5 - icy)*ify*Z;
                 z=Z;
-            }
-            else
-            {
-                x=NAN;
-                y=NAN;
-                z=NAN;
+            } else {
+                if(Z>0)
+                {
+                    x=(x_side + 0.5 - icx)*ifx*Z;
+                    y=(y_side + 0.5 - icy)*ify*Z;
+                    z=Z;
+                }
+                else
+                {
+                    x=NAN;
+                    y=NAN;
+                    z=NAN;
+                }
             }
 
             cloud->points[n].x=x;
@@ -522,25 +543,40 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr generatePointCloud(cv::Mat medianImage,st
 
     std::vector<int> removedPoints;
     pcl::removeNaNFromPointCloud(*cloud,*cloud,removedPoints);
-    pcl::io::savePLYFileBinary(name+".ply",*cloud);
+    pcl::io::savePLYFileASCII(name+".ply",*cloud);
     return cloud;
 }
 
-cv::Mat repairInputData(cv::Mat image, cv::Mat median, int count){
+cv::Mat repairInputData(cv::Mat image, cv::Mat interfROI,  cv::Mat median, int count){
 
-    for(int i=0;i<image.rows;i++){
-        for(int j=0;j<image.cols;j++){
-            auto imagePixel = image.at<float>(i,j);
-            auto medianPixel = median.at<float>(i,j);
+//    cv::imwrite(path+"/data/image"+ IntToStr(count) + ".png",image);
+//    cv::imwrite(path+"/data/interf"+ IntToStr(count) + ".png",interfROI);
 
-            auto var = abs(imagePixel-medianPixel);
+    ofstream myfile;
+    myfile.open(path + "/data/" + IntToStr(count) +".txt");
+    for(int i=0;i<image.cols;i++){
+        for(int j=0;j<image.rows;j++){
+//            if(interfROI.at<uint>(i,j)>0){
+//                std::cout<<interfROI.at<uint>(i,j)<<std::endl;
+                auto imagePixel = image.at<float>(i,j);
+                auto medianPixel = median.at<float>(i,j);
 
-            if(var>20){
-                image.at<float>(i,j)=medianPixel;
-            }
+                auto var = abs(imagePixel-medianPixel);
+
+                if(var>replace_thresh){
+//                    image.at<float>(i,j)=medianPixel;
+                    myfile<<1<<"\n";
+                    image.at<float>(i,j)=0;
+
+                } else {
+                    myfile<<0<<"\n";
+                }
+
+//            }
         }
     }
-    (void)generatePointCloud(image,path+"/data/cloud"+IntToStr(count));
+    myfile.close();
+//    (void)generatePointCloud(image,path+"/data/cloud"+IntToStr(count));
     return image;
 }
 
@@ -564,6 +600,19 @@ void saveLUT(cv::Mat depth, std::string path)
     }
 
     myfile.close();
+}
+
+cv::Mat generateIslands(cv::Mat image){
+    float lower_bound = 650;
+    float upper_bound = 653;
+    std::uniform_real_distribution<float> unif(lower_bound,upper_bound);
+    std::default_random_engine re;
+    for(int i=0; i < 20; i++){
+        for(int j=0; j<20; j++){
+            image.at<float>(100+i,100+j)=unif(re);
+        }
+    }
+    return image;
 }
 
 template <class T>

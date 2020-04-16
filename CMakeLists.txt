@@ -13,9 +13,9 @@ endif(CCACHE_FOUND)
 set (CMAKE_CXX_FLAGS "-DPCL_ONLY_CORE_POINT_TYPES=ON -DNO_EXPLICIT_INSTANTIATIONS")
 
 #find requirements
-find_package(PCL 1.10 REQUIRED )
+find_package(PCL 1.9 REQUIRED )
 find_package(OpenCV REQUIRED )
-find_package(VTK 8.2 REQUIRED )
+find_package(VTK REQUIRED )
 find_package(Threads )
 
 #link libs
@@ -25,8 +25,7 @@ link_directories(${PCL_LIBRARY_DIRS})
 add_definitions(${PCL_DEFINITIONS})
 
 #load src directory
-file(GLOB_RECURSE SRCS *.cpp)
-add_executable(${PROJECT}  ${SRCS})
+add_executable(${PROJECT} main.cpp)
 
 target_link_libraries(${PROJECT} ${PCL_LIBRARIES} ${PCL_FILTERS_LIBRARIES} ${OpenCV_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} )
 
@@ -44,4 +43,3 @@ set_target_properties(${PROJECT} PROPERTIES
 )
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++14")
-
