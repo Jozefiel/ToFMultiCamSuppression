@@ -15,6 +15,9 @@
 #include <chrono>
 #include <random>
 
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/ini_parser.hpp>
+
 using namespace std;
 namespace fs = boost::filesystem;
 
@@ -35,6 +38,7 @@ cv::Mat repairInputData(cv::Mat image, cv::Mat interfROI, cv::Mat median, int co
 void saveLUT(cv::Mat depth, std::string path);
 cv::Mat generateIslands(cv::Mat image);
 pcl::PointCloud<pcl::PointXYZRGB> transformCloud(pcl::PointCloud<pcl::PointXYZRGB> cloud, Eigen::Matrix4d transformCLoud);
+Eigen::Matrix4d loadCamParams(char i);
 
 
 string path;
@@ -60,65 +64,13 @@ cv::Rect removeGB(0, 240, 512, 94); //druhaseria_0
 
 pcl::PointCloud<pcl::PointXYZRGB> medianCloud;
 pcl::PointCloud<pcl::PointXYZRGB> original_merge;
-Eigen::Matrix4d transform_matrix_left;
-Eigen::Matrix4d transform_matrix_right;
-Eigen::Matrix4d transform_matrix_central;
 
+
+float fx=363.709,fy=363.709,cx=254.799,cy=209.699;
 
 
 int main(int argc, char **argv)
 {
-
-    transform_matrix_central (0,0) = 1;
-    transform_matrix_central (0,1) = 0;
-    transform_matrix_central (0,2) = 0;
-    transform_matrix_central (0,3) = 0;
-    transform_matrix_central (1,0) = 0;
-    transform_matrix_central (1,1) = 1;
-    transform_matrix_central (1,2) = 0;
-    transform_matrix_central (1,3) = 0;
-    transform_matrix_central (2,0) = 0;
-    transform_matrix_central (2,1) = 0;
-    transform_matrix_central (2,2) = 1;
-    transform_matrix_central (2,3) = 0;
-    transform_matrix_central (3,0) = 0;
-    transform_matrix_central (3,1) = 0;
-    transform_matrix_central (3,2) = 0;
-    transform_matrix_central (3,3) = 0;
-
-    transform_matrix_left (0,0) = 0.02;
-    transform_matrix_left (0,1) = -0.10;
-    transform_matrix_left (0,2) = 0.99;
-    transform_matrix_left (0,3) = -0.74;
-    transform_matrix_left (1,0) = 0.15;
-    transform_matrix_left (1,1) = 0.98;
-    transform_matrix_left (1,2) = 0.098;
-    transform_matrix_left (1,3) = -0.095;
-    transform_matrix_left (2,0) = -0.99;
-    transform_matrix_left (2,1) = 0.08;
-    transform_matrix_left (2,2) = 0.04;
-    transform_matrix_left (2,3) = 0.62;
-    transform_matrix_left (3,0) = 0;
-    transform_matrix_left (3,1) = 0;
-    transform_matrix_left (3,2) = 0;
-    transform_matrix_left (3,3) = 0;
-
-    transform_matrix_right (0,0) = 0.09;
-    transform_matrix_right (0,1) = 0.16;
-    transform_matrix_right (0,2) = -0.98;
-    transform_matrix_right (0,3) = 0.56;
-    transform_matrix_right (1,0) = -0.14;
-    transform_matrix_right (1,1) = 0.98;
-    transform_matrix_right (1,2) = 0.15;
-    transform_matrix_right (1,3) = -0.07;
-    transform_matrix_right (2,0) = 0.99;
-    transform_matrix_right (2,1) = 0.13;
-    transform_matrix_right (2,2) = 0.11;
-    transform_matrix_right (2,3) = 0.50;
-    transform_matrix_right (3,0) = 0;
-    transform_matrix_right (3,1) = 0;
-    transform_matrix_right (3,2) = 0;
-    transform_matrix_right (3,3) = 0;
 
     Eigen::Matrix4d transform_matrix;
 
@@ -139,16 +91,8 @@ int main(int argc, char **argv)
     int frameBufferSize=0;  
     std::string object = path;
 
-    if(path.at(path.size()-2) == 1){
-        transform_matrix=transform_matrix_central;
-    } else if (path.at(path.size()-2) == 0) {
-        transform_matrix=transform_matrix_right;
-    } else if (path.at(path.size()-2) == 2) {
-        transform_matrix=transform_matrix_left;
-    }
+    transform_matrix=loadCamParams(path.at(path.size()-2));
 
-    auto camera = path.at(path.size()-2);
-    cout<<camera<<std::endl;
     std::string delimiter = "/";
     std::string token = object.substr(5, object.find(delimiter));
     size_t pos = 0;
@@ -234,8 +178,8 @@ int main(int argc, char **argv)
             }
         }
     }
-
-    pcl::io::savePLYFileASCII("/media/jozefvolak/Maxtor/DIZERTACKA/pre_kuba/inter/" + saveName[5] + "_" + saveName[7] + ".ply",original_merge);
+    original_merge = transformCloud(original_merge, transform_matrix);
+    pcl::io::savePLYFileASCII(path + "/data/" + saveName[5] + "_" + saveName[7] + ".ply",original_merge);
 
     then=std::chrono::system_clock::now();
 
@@ -260,8 +204,6 @@ int main(int argc, char **argv)
 
     medianCloud = generatePointCloud(interpolated,path+"/data/median", false,transform_matrix);
 
-
-
         //    cv::normalize(interpolated, interpolated, 0, 255,cv::NORM_MINMAX);
 //    cv::imwrite(path + "/data/median.hdr",interpolated);
 //    saveLUT(interpolated,path);
@@ -282,7 +224,7 @@ int main(int argc, char **argv)
          merged_clouds_viewer += tmp;
          i++;
     }
-    pcl::io::savePLYFileASCII("/media/jozefvolak/Maxtor/DIZERTACKA/pre_kuba/filter/imbm/" + saveName[5] + "_" + saveName[7] + ".ply" ,merged_clouds_viewer);
+    pcl::io::savePLYFileASCII(path + "/data/" + saveName[5] + "_" + saveName[7] + ".ply" ,merged_clouds_viewer);
 
 
     now=std::chrono::system_clock::now();
@@ -602,12 +544,17 @@ cv::Mat interpolation(cv::Mat image, cv::Mat binary){
 
 
 pcl::PointCloud<pcl::PointXYZRGB> generatePointCloud(cv::Mat medianImage,std::string name, bool withNaN, Eigen::Matrix4d transformCLoud){
-
-    transpose(medianImage, medianImage);
     cv::Mat tmpImage;
-    transpose(reference_rgb, tmpImage);
+
+    //transpose(medianImage, medianImage);
+    cv::flip(medianImage, tmpImage, 1);
+    medianImage=tmpImage;
+    cv::flip(reference_rgb, tmpImage, 1);
+
+//    transpose(reference_rgb, tmpImage);
+//    tmpImage = reference_rgb;
     cv::imwrite("depth_med.png",medianImage);
-    cv::imwrite("ref.png",tmpImage);
+    cv::imwrite("ref.png",reference_rgb);
 
     pcl::PointCloud<pcl::PointXYZRGB> cloud; //(new pcl::PointCloud<pcl::PointXYZRGB>);
     cloud.width = static_cast<uint32_t>(medianImage.cols);
@@ -617,7 +564,6 @@ pcl::PointCloud<pcl::PointXYZRGB> generatePointCloud(cv::Mat medianImage,std::st
 
     uint32_t n=0;
     double x=0, y=0, z=0;
-    const float fx=363.709,fy=363.709,cx=254.799,cy=209.699;
     cvtColor(tmpImage, tmpImage, cv::COLOR_RGBA2RGB);
 //    flip(reference_rgb, reference_rgb, +1);
 
@@ -627,8 +573,9 @@ pcl::PointCloud<pcl::PointXYZRGB> generatePointCloud(cv::Mat medianImage,std::st
         {
             const float icx(cx), icy(cy);
             const float ifx(1/fx), ify(1/fy);
+
             double Z = medianImage.at<float>(y_side, x_side)/1000.0f;
- //           auto Z=medianImage.data[512*y_side+x_side]/1000.0f;
+  //          auto Z=medianImage.data[512*y_side+x_side]/1000.0f;
 
             if(withNaN){
                 x=(x_side + 0.5 - icx)*ifx*Z;
@@ -680,9 +627,8 @@ pcl::PointCloud<pcl::PointXYZRGB> generatePointCloud(cv::Mat medianImage,std::st
 
     std::vector<int> removedPoints;
     pcl::removeNaNFromPointCloud(cloud,cloud,removedPoints);
+    pcl::transformPointCloud(cloud,cloud,transformCLoud,false);
     pcl::io::savePLYFileASCII(name+".ply",cloud);
-    cloud = transformCloud(cloud, transformCLoud);
-
     return cloud;
 }
 
@@ -754,8 +700,64 @@ cv::Mat generateIslands(cv::Mat image){
 
 
 pcl::PointCloud<pcl::PointXYZRGB> transformCloud(pcl::PointCloud<pcl::PointXYZRGB> cloud, Eigen::Matrix4d transformCLoud){
-    pcl::transformPointCloud(cloud,cloud,transformCLoud,true);
-    return cloud;
+    pcl::PointCloud<pcl::PointXYZRGB> rotated;
+    return rotated;
+}
+
+
+Eigen::Matrix4d loadCamParams(char i)
+{
+    std::string serial(1,i);
+    Eigen::Matrix4d transform_matrix;
+
+    try {
+        boost::property_tree::ptree pt;
+        boost::property_tree::ini_parser::read_ini("config/" + serial +".ini", pt);
+
+        cx = pt.get<float>("Calibration.transform_ir_cx");
+        cy = pt.get<float>("Calibration.transform_ir_cy");
+        fx = pt.get<float>("Calibration.transform_ir_fx");
+        fy = pt.get<float>("Calibration.transform_ir_fy");
+
+        transform_matrix (0,0) = pt.get<double>("Calibration.transform_00");
+        transform_matrix (0,1) = pt.get<double>("Calibration.transform_01");
+        transform_matrix (0,2) = pt.get<double>("Calibration.transform_02");
+        transform_matrix (0,3) = pt.get<double>("Calibration.transform_03");
+        transform_matrix (1,0) = pt.get<double>("Calibration.transform_10");
+        transform_matrix (1,1) = pt.get<double>("Calibration.transform_11");
+        transform_matrix (1,2) = pt.get<double>("Calibration.transform_12");
+        transform_matrix (1,3) = pt.get<double>("Calibration.transform_13");
+        transform_matrix (2,0) = pt.get<double>("Calibration.transform_20");
+        transform_matrix (2,1) = pt.get<double>("Calibration.transform_21");
+        transform_matrix (2,2) = pt.get<double>("Calibration.transform_22");
+        transform_matrix (2,3) = pt.get<double>("Calibration.transform_23");
+        transform_matrix (3,0) = pt.get<double>("Calibration.transform_30");
+        transform_matrix (3,1) = pt.get<double>("Calibration.transform_31");
+        transform_matrix (3,2) = pt.get<double>("Calibration.transform_32");
+        transform_matrix (3,3) = pt.get<double>("Calibration.transform_33");
+
+
+    } catch (int e) {
+
+        std::cout << "No init config found for: "<< serial << e <<std::endl;
+        transform_matrix (0,0) = 1;
+        transform_matrix (0,1) = 0;
+        transform_matrix (0,2) = 0;
+        transform_matrix (0,3) = 0;
+        transform_matrix (1,0) = 0;
+        transform_matrix (1,1) = 1;
+        transform_matrix (1,2) = 0;
+        transform_matrix (1,3) = 0;
+        transform_matrix (2,0) = 0;
+        transform_matrix (2,1) = 0;
+        transform_matrix (2,2) = 1;
+        transform_matrix (2,3) = 0;
+        transform_matrix (3,0) = 0;
+        transform_matrix (3,1) = 0;
+        transform_matrix (3,2) = 0;
+        transform_matrix (3,3) = 1;
+    }
+   return transform_matrix;
 }
 
 template <class T>
