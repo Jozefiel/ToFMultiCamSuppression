@@ -39,6 +39,7 @@ void saveLUT(cv::Mat depth, std::string path);
 cv::Mat generateIslands(cv::Mat image);
 pcl::PointCloud<pcl::PointXYZRGB> transformCloud(pcl::PointCloud<pcl::PointXYZRGB> cloud, Eigen::Matrix4d transformCLoud);
 Eigen::Matrix4d loadCamParams(char i);
+cv::Mat repairRGB(cv::Mat depth, cv::Mat rgb);
 
 
 string path;
@@ -202,7 +203,15 @@ int main(int argc, char **argv)
     cv::inRange(interpolated,1,1000,binary_median);
     cv::imwrite(path + "/data/median_bin.png",binary_median);
 
-    medianCloud = generatePointCloud(interpolated,path+"/data/median", false,transform_matrix);
+    cv::Mat eroded;
+    cv::Mat element = cv::getStructuringElement( cv::MORPH_RECT,cv::Size( 1*5 + 1, 1*5+1 ),cv::Point( 3, 3 ) );
+    cv::erode( interpolated, eroded, element );
+
+
+    reference_rgb=repairRGB(eroded,reference_rgb);
+    cv::imwrite(path + "/data/repaired.png",reference_rgb);
+
+    medianCloud = generatePointCloud(eroded,path+"/data/median", false,transform_matrix);
 
         //    cv::normalize(interpolated, interpolated, 0, 255,cv::NORM_MINMAX);
 //    cv::imwrite(path + "/data/median.hdr",interpolated);
@@ -564,6 +573,7 @@ pcl::PointCloud<pcl::PointXYZRGB> generatePointCloud(cv::Mat medianImage,std::st
 
     uint32_t n=0;
     double x=0, y=0, z=0;
+    cv::Vec3b tmp_rgb, rgb;
     cvtColor(tmpImage, tmpImage, cv::COLOR_RGBA2RGB);
 //    flip(reference_rgb, reference_rgb, +1);
 
@@ -596,31 +606,34 @@ pcl::PointCloud<pcl::PointXYZRGB> generatePointCloud(cv::Mat medianImage,std::st
                 }
             }
 
-            cloud.points[n].x=x;
-            cloud.points[n].y=y;
-            cloud.points[n].z=z;
+
 //            cloud->points[n].r=maskRGB.at<cv::Vec3b>(x_side,y_side)[2];
 //            cloud->points[n].g=maskRGB.at<cv::Vec3b>(x_side,y_side)[1];
 //            cloud->points[n].b=maskRGB.at<cv::Vec3b>(x_side,y_side)[0];
 
             cv::Vec3b tmp_rgb=tmpImage.at<cv::Vec3b>(y_side,x_side);
-            if(tmp_rgb[2]==0 && tmp_rgb[1]==0 && tmp_rgb[0]==0)
+            if(tmp_rgb[2]!=0 && tmp_rgb[1]!=0 && tmp_rgb[0]!=0)
             {
-              tmp_rgb[2]=10;
-              tmp_rgb[1]=10;
-              tmp_rgb[0]=10;
+              rgb[2]=tmp_rgb[2];
+              rgb[1]=tmp_rgb[1];
+              rgb[0]=tmp_rgb[0];
+//              x=NAN;
+//              y=NAN;
+//              z=NAN;
             }
 
-            if(tmp_rgb[2]>170 && tmp_rgb[1]>170 && tmp_rgb[0]>170)
+            if(tmp_rgb[2]<120 && tmp_rgb[1]<120 && tmp_rgb[0]<120)
             {
-              tmp_rgb[2]=10;
-              tmp_rgb[1]=10;
-              tmp_rgb[0]=10;
+                rgb[2]=tmp_rgb[2];
+                rgb[1]=tmp_rgb[1];
+                rgb[0]=tmp_rgb[0];
             }
-
-            cloud.points[n].r=tmp_rgb[2];
-            cloud.points[n].g=tmp_rgb[1];
-            cloud.points[n].b=tmp_rgb[0];
+            cloud.points[n].x=x;
+            cloud.points[n].y=y;
+            cloud.points[n].z=z;
+            cloud.points[n].r=rgb[2];
+            cloud.points[n].g=rgb[1];
+            cloud.points[n].b=rgb[0];
             n++;
         }
     }
@@ -759,6 +772,26 @@ Eigen::Matrix4d loadCamParams(char i)
     }
    return transform_matrix;
 }
+
+cv::Mat repairRGB(cv::Mat depth, cv::Mat rgb){
+
+    cv::Mat binaryDepth, binaryHoles, common, replacedMask;
+    cv::inRange(depth,10,900,binaryDepth);
+
+    cv::inRange(rgb,cv::Scalar(0,0,0),cv::Scalar(1,1,1),binaryHoles);
+    cv::bitwise_and(binaryDepth,binaryHoles,common);
+    cv::inpaint(rgb,common,replacedMask,5,cv::INPAINT_TELEA);
+
+
+    cv::inRange(replacedMask,cv::Scalar(120,120,120),cv::Scalar(255,255,255),binaryHoles);
+
+    cv::bitwise_and(binaryDepth,binaryHoles,common);
+    cv::inpaint(replacedMask,common,replacedMask,5,cv::INPAINT_TELEA);
+    cv::imwrite(path + "/data/replacedMask.png",common);
+
+    return replacedMask;
+}
+
 
 template <class T>
 std::string IntToStr(T n){
